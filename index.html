@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#0d0d0d">
+    <link rel="manifest" href="manifest.json">
+    <title>路徑追蹤者 - 神經康復工程</title>
+
+    <link rel="stylesheet" href="https://pyscript.net/releases/2024.1.1/core.css" />
+    <script type="module" src="https://pyscript.net/releases/2024.1.1/core.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0d0d0d;
+            --text-color: #fff;
+            --path-color: rgba(100, 100, 100, 0.6);
+            --path-highlight: #ffea00;
+            --path-error: #ff3333;
+            --path-neon-glow: 0 0 10px var(--path-highlight), 0 0 20px var(--path-highlight);
+            --path-error-glow: 0 0 10px var(--path-error), 0 0 20px var(--path-error);
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none;
+        }
+
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            height: 100dvh;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #header {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            text-align: center;
+            padding: 20px;
+            font-size: 28px;
+            font-weight: bold;
+            z-index: 10;
+            text-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+            pointer-events: none;
+        }
+
+        #stats-container {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            text-align: center;
+            font-size: 18px;
+            color: #aaa;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        canvas {
+            flex: 1;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        #success-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 20;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 1s ease-in-out;
+        }
+
+        #success-overlay.visible {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        #flower-emoji {
+            font-size: 15rem;
+            animation: bloom 1.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+            transform: scale(0);
+            filter: drop-shadow(0 0 30px rgba(255, 50, 100, 0.8));
+            line-height: 1;
+        }
+
+        #success-text {
+            font-size: 3rem;
+            font-weight: bold;
+            color: #ffb3c6;
+            text-shadow: 0 0 20px #ff0055;
+            margin-top: 20px;
+            opacity: 0;
+            animation: fadeIn 1s 1s forwards;
+        }
+
+        @keyframes bloom {
+            0% {
+                transform: scale(0) rotate(-20deg);
+                opacity: 0;
+            }
+
+            50% {
+                transform: scale(1.1) rotate(10deg);
+                opacity: 1;
+            }
+
+            100% {
+                transform: scale(1) rotate(0deg);
+                opacity: 1;
+            }
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+            }
+        }
+
+        /* Lighthouse styling */
+        .lighthouse {
+            position: absolute;
+            font-size: 60px;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            text-shadow: 0 0 20px #ff3333;
+            transition: all 0.2s;
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1;
+                filter: drop-shadow(0 0 30px red);
+            }
+
+            50% {
+                opacity: 0.4;
+                filter: drop-shadow(0 0 5px red);
+            }
+        }
+
+        @keyframes blinkFast {
+
+            0%,
+            100% {
+                opacity: 1;
+                filter: drop-shadow(0 0 40px red);
+            }
+
+            50% {
+                opacity: 0.2;
+                filter: drop-shadow(0 0 5px red);
+            }
+        }
+
+        /* Target Start point */
+        .start-point {
+            position: absolute;
+            width: 60px;
+            height: 60px;
+            background: radial-gradient(circle, #fff 0%, #ffea00 40%, transparent 80%);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            box-shadow: 0 0 30px #ffea00;
+            animation: pulseStart 2s infinite;
+        }
+
+        @keyframes pulseStart {
+            0% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0.8;
+            }
+
+            50% {
+                transform: translate(-50%, -50%) scale(1.2);
+                opacity: 1;
+            }
+
+            100% {
+                transform: translate(-50%, -50%) scale(1);
+                opacity: 0.8;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="header">請沿著小路，把光送到左邊的燈塔</div>
+    <div id="stats-container">
+        今日完成: <span id="stat-count">0</span>/5 | 偏離次數: <span id="stat-errors">0</span> | 耗時: <span
+            id="stat-time">0.0</span>s
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+    <div id="start-node" class="start-point" style="display: none;"></div>
+    <div id="lighthouse" class="lighthouse" style="display: none;">🗼</div>
+
+    <div id="success-overlay">
+        <div id="flower-emoji">🌸</div>
+        <div id="success-text">成功抵達！太厲害了！</div>
+    </div>
+
+    <script type="py">
+    import math
+    import random
+    import time
+    import json
+    from pyodide.ffi import create_proxy
+    from js import window, document, localStorage
+    
+    # State mapping and global variables
+    canvas = document.getElementById("gameCanvas")
+    ctx = canvas.getContext("2d")
+    header = document.getElementById("header")
+    start_node = document.getElementById("start-node")
+    lighthouse = document.getElementById("lighthouse")
+    stat_count = document.getElementById("stat-count")
+    stat_errors = document.getElementById("stat-errors")
+    stat_time = document.getElementById("stat-time")
+    
+    # Constants
+    PATH_WIDTH = 30
+    TOLERANCE_PX = 40
+    MARGIN_X = 100
+    
+    # Game State
+    class GameState:
+        def __init__(self):
+            self.width = 0
+            self.height = 0
+            self.points = []        # Precalculated path points
+            self.progress = 0       # Index in points array
+            self.is_active = False  # Is currently tracking
+            self.is_error = False   # Is currently out of bounds
+            self.error_count = 0
+            self.start_time = 0
+            self.last_move_time = 0
+            self.idle_triggered = False
+            self.pulses = []        # Idle pulse animations
+            self.completed = False
+            self.touch_pos = None
+
+    state = GameState()
+    anim_frame_id = None
+    
+    def load_data():
+        try:
+            raw = localStorage.getItem("rehab_path_data")
+            if raw:
+                data = json.loads(raw)
+            else:
+                data = {}
+        except:
+            data = {}
+        
+        today = window.Date.new().toLocaleDateString()
+        if data.get("date") != today:
+            data = {
+                "date": today,
+                "completions": 0,
+                "history": []
+            }
+        return data
+
+    def save_data(errors, elapsed):
+        data = load_data()
+        data["completions"] = data.get("completions", 0) + 1
+        data["history"].append({
+            "errors": errors,
+            "time": elapsed
+        })
+        localStorage.setItem("rehab_path_data", json.dumps(data))
+        update_stats_ui(data["completions"], errors, elapsed)
+
+    def update_stats_ui(count, errors=0, elapsed=0.0):
+        stat_count.innerText = str(count)
+        stat_errors.innerText = str(errors)
+        stat_time.innerText = f"{elapsed:.1f}"
+        
+    # Bezier calculation
+    def cubic_bezier(t, p0, p1, p2, p3):
+        u = 1 - t
+        tt = t * t
+        uu = u * u
+        uuu = uu * u
+        ttt = tt * t
+        
+        px = uuu * p0[0] + 3 * uu * t * p1[0] + 3 * u * tt * p2[0] + ttt * p3[0]
+        py = uuu * p0[1] + 3 * uu * t * p1[1] + 3 * u * tt * p2[1] + ttt * p3[1]
+        return (px, py)
+        
+    def generate_path():
+        w = state.width
+        h = state.height
+        
+        # Start at right, End at left
+        sy = random.uniform(h*0.2, h*0.8)
+        ey = random.uniform(h*0.2, h*0.8)
+        
+        p0 = (w - MARGIN_X, sy)
+        p3 = (MARGIN_X, ey)
+        
+        # Random control points to create a smooth curve without loops
+        cp1x = random.uniform(w*0.5, w*0.8)
+        cp1y = random.uniform(0, h)
+        
+        cp2x = random.uniform(w*0.2, w*0.5)
+        cp2y = random.uniform(0, h)
+        
+        p1 = (cp1x, cp1y)
+        p2 = (cp2x, cp2y)
+        
+        # Precompute points (200 segments)
+        points = []
+        for i in range(201):
+            t = i / 200.0
+            points.append(cubic_bezier(t, p0, p1, p2, p3))
+            
+        return points
+        
+    def resize_canvas(e=None):
+        w = canvas.clientWidth
+        h = canvas.clientHeight
+        canvas.width = int(w) if w > 0 else window.innerWidth
+        canvas.height = int(h) if h > 0 else window.innerHeight
+        state.width = canvas.width
+        state.height = canvas.height
+        
+        if not state.is_active and not state.completed:
+            init_round()
+            
+    def init_round():
+        state.points = generate_path()
+        state.progress = 0
+        state.is_active = False
+        state.is_error = False
+        state.error_count = 0
+        state.idle_triggered = False
+        state.pulses = []
+        state.completed = False
+        state.touch_pos = None
+        
+        # Position DOM elements
+        p0 = state.points[0]
+        p3 = state.points[-1]
+        
+        start_node.style.left = f"{p0[0]}px"
+        start_node.style.top = f"{p0[1]}px"
+        start_node.style.display = "block"
+        
+        lighthouse.style.left = f"{p3[0]}px"
+        lighthouse.style.top = f"{p3[1]}px"
+        lighthouse.style.display = "block"
+        lighthouse.style.animation = "blink 2s infinite"
+        
+        document.getElementById("success-overlay").classList.remove("visible")
+        header.innerText = "請沿著小路，把光送到左邊的燈塔"
+        header.style.color = "#fff"
+        
+        data = load_data()
+        update_stats_ui(data.get("completions", 0))
+        
+        draw()
+
+    def sq_distance(p1, p2):
+        return (p1[0] - p2[0])**2 + (p1[1] - p2[1])**2
+
+    def get_client_pos(e):
+        if hasattr(e, 'touches') and getattr(e.touches, 'length', 0) > 0:
+            return e.touches.item(0).clientX, e.touches.item(0).clientY
+        return e.clientX, e.clientY
+
+    def handle_touch_start(e):
+        e.preventDefault()
+        if state.completed:
+            return
+            
+        touch_x, touch_y = get_client_pos(e)
+        
+        # Check start point proximity
+        p0 = state.points[0]
+        if math.sqrt(sq_distance((touch_x, touch_y), p0)) < 80:
+            state.is_active = True
+            state.start_time = time.time()
+            state.last_move_time = state.start_time
+            state.progress = 0
+            state.idle_triggered = False
+            state.is_error = False
+            state.touch_pos = (touch_x, touch_y)
+            start_node.style.display = "none"
+            header.innerText = "請沿著小路，把光送到左邊的燈塔"
+            header.style.color = "#fff"
+
+    def handle_touch_move(e):
+        e.preventDefault()
+        if not state.is_active or state.completed:
+            return
+            
+        touch_x, touch_y = get_client_pos(e)
+        state.touch_pos = (touch_x, touch_y)
+        
+        # Update last move time to avoid idle trigger
+        dist_moved = 1000
+        if state.touch_pos:
+            dist_moved = math.sqrt(sq_distance((touch_x, touch_y), state.touch_pos))
+            
+        if dist_moved > 5:
+            state.last_move_time = time.time()
+            if state.idle_triggered:
+                # Reset idle state
+                state.idle_triggered = False
+                lighthouse.style.animation = "blink 2s infinite"
+
+        # Find closest point on curve (forward search)
+        min_dist_sq = float('inf')
+        best_idx = state.progress
+        
+        # Search a window forward to prevent skipping but allow smooth tracking
+        search_end = min(len(state.points), state.progress + 30)
+        for i in range(state.progress, search_end):
+            d = sq_distance((touch_x, touch_y), state.points[i])
+            if d < min_dist_sq:
+                min_dist_sq = d
+                best_idx = i
+                
+        # If user is trying to backtrack, also check backwards briefly
+        if best_idx == state.progress and state.progress > 0:
+            for i in range(max(0, state.progress - 10), state.progress):
+                d = sq_distance((touch_x, touch_y), state.points[i])
+                if d < min_dist_sq:
+                    min_dist_sq = d
+                    best_idx = i
+
+        dist = math.sqrt(min_dist_sq)
+        
+        if dist > TOLERANCE_PX:
+            state.error_count += 1
+            header.innerText = "偏離路線！請回到起點重新開始"
+            header.style.color = "#ff3333"
+            try:
+                window.navigator.vibrate([50])
+            except:
+                pass
+            
+            # 偏離路線：立即中斷並讓球回到原點
+            state.is_active = False
+            state.is_error = False
+            state.progress = 0
+            state.touch_pos = None
+            start_node.style.display = "block"
+            p0 = state.points[0]
+            start_node.style.left = f"{p0[0]}px"
+            start_node.style.top = f"{p0[1]}px"
+            return
+        else:
+            # Advance progress if not in error
+            if best_idx > state.progress:
+                state.progress = best_idx
+                
+            # Check win
+            if state.progress >= len(state.points) - 2:
+                handle_win()
+
+    def handle_touch_end(e):
+        e.preventDefault()
+        if state.completed:
+            # tap to restart
+            init_round()
+            return
+
+        if state.is_active:
+            state.is_active = False
+            state.is_error = False
+            state.touch_pos = None
+            header.innerText = "請沿著小路，把光送到左邊的燈塔"
+            header.style.color = "#fff"
+            start_node.style.display = "block"
+            
+            # 中途停止：進度歸零，必須從起點重新開始
+            state.progress = 0
+            curr_p = state.points[0]
+            start_node.style.left = f"{curr_p[0]}px"
+            start_node.style.top = f"{curr_p[1]}px"
+
+    def handle_win():
+        state.completed = True
+        state.is_active = False
+        state.touch_pos = None
+        
+        elapsed = time.time() - state.start_time if state.start_time > 0 else 0
+        save_data(state.error_count, elapsed)
+        
+        lighthouse.style.animation = "blinkFast 0.5s infinite"
+        
+        overlay = document.getElementById("success-overlay")
+        overlay.classList.add("visible")
+        
+        # Randomly choose flower
+        emoji = document.getElementById("flower-emoji")
+        emoji.innerText = random.choice(["🌹", "🌸", "🌺"])
+
+    def draw():
+        # Clear canvas
+        ctx.fillStyle = "rgba(13, 13, 13, 0.3)" # slight trail effect if we want, but full clear is safer for sharp neon
+        ctx.clearRect(0, 0, state.width, state.height)
+        
+        if not state.points:
+            window.requestAnimationFrame(create_proxy(lambda _: draw()))
+            return
+
+        # 1. Base path
+        ctx.beginPath()
+        ctx.moveTo(state.points[0][0], state.points[0][1])
+        for p in state.points[1:]:
+            ctx.lineTo(p[0], p[1])
+            
+        ctx.lineWidth = PATH_WIDTH
+        ctx.lineCap = "round"
+        ctx.lineJoin = "round"
+        
+        if state.is_error:
+            # Error flash
+            ctx.strokeStyle = "rgba(255, 50, 50, 0.6)"
+            ctx.shadowColor = "#ff3333"
+            ctx.shadowBlur = 15
+        else:
+            ctx.strokeStyle = "rgba(100, 100, 100, 0.5)"
+            ctx.shadowColor = "transparent"
+            ctx.shadowBlur = 0
+            
+        ctx.stroke()
+        
+        # 2. Highlighted traversed path
+        if state.progress > 0:
+            ctx.beginPath()
+            ctx.moveTo(state.points[0][0], state.points[0][1])
+            for i in range(1, state.progress + 1):
+                ctx.lineTo(state.points[i][0], state.points[i][1])
+                
+            ctx.lineWidth = PATH_WIDTH - 4
+            
+            if state.is_error:
+                ctx.strokeStyle = "#ff3333"
+            else:
+                ctx.strokeStyle = "#ffea00"
+                ctx.shadowColor = "#ffea00"
+                ctx.shadowBlur = 20
+                
+            ctx.stroke()
+            ctx.shadowBlur = 0 # reset
+            
+        # 3. Handle Idle logic (visual pull)
+        current_t = time.time()
+        if state.is_active and not state.is_error and not state.completed:
+            if current_t - state.last_move_time > 3.0:
+                if not state.idle_triggered:
+                    state.idle_triggered = True
+                    lighthouse.style.animation = "blinkFast 0.5s infinite"
+                
+                # Emit pulse occasionally
+                if random.random() < 0.05: # roughly every few frames
+                    state.pulses.append({
+                        "t": 1.0,  # starts at lighthouse (end)
+                        "speed": random.uniform(0.01, 0.02)
+                    })
+                    
+        # 4. Draw guiding pulses from lighthouse
+        active_pulses = []
+        for p in state.pulses:
+            p["t"] -= p["speed"]
+            if p["t"] > (state.progress / len(state.points)): # only travel down to current progress
+                idx = int(p["t"] * (len(state.points)-1))
+                pos = state.points[idx]
+                
+                ctx.beginPath()
+                ctx.arc(pos[0], pos[1], 10, 0, math.pi * 2)
+                ctx.fillStyle = f"rgba(255, 255, 255, {p['t']})"
+                ctx.shadowColor = "#fff"
+                ctx.shadowBlur = 10
+                ctx.fill()
+                ctx.shadowBlur = 0
+                
+                active_pulses.append(p)
+        state.pulses = active_pulses
+        
+        # 5. Draw the player "light"
+        if state.is_active or state.progress > 0:
+            curr_pos = state.points[state.progress]
+            
+            # Smooth tracking towards touch
+            glow_x = curr_pos[0]
+            glow_y = curr_pos[1]
+            if state.touch_pos and not state.is_error:
+                 glow_x = state.touch_pos[0] * 0.2 + curr_pos[0] * 0.8
+                 glow_y = state.touch_pos[1] * 0.2 + curr_pos[1] * 0.8
+            
+            ctx.beginPath()
+            ctx.arc(glow_x, glow_y, 25, 0, math.pi * 2)
+            ctx.fillStyle = "#fff"
+            
+            if state.is_error:
+                ctx.shadowColor = "#ff3333"
+                ctx.fillStyle = "#ffaaaa"
+            else:
+                ctx.shadowColor = "#ffea00"
+                
+            ctx.shadowBlur = 30
+            ctx.fill()
+            ctx.shadowBlur = 0
+
+        # Loop
+        window.requestAnimationFrame(create_proxy(lambda _: draw()))
+
+    # Event bindings
+    proxy_touchstart = create_proxy(handle_touch_start)
+    proxy_touchmove = create_proxy(handle_touch_move)
+    proxy_touchend = create_proxy(handle_touch_end)
+    proxy_resize = create_proxy(resize_canvas)
+    
+    # Touch events fallback to mouse for testing on desktop
+    canvas.addEventListener("touchstart", proxy_touchstart, {"passive": False})
+    canvas.addEventListener("touchmove", proxy_touchmove, {"passive": False})
+    canvas.addEventListener("touchend", proxy_touchend, {"passive": False})
+    canvas.addEventListener("touchcancel", proxy_touchend, {"passive": False})
+    
+    canvas.addEventListener("mousedown", proxy_touchstart)
+    canvas.addEventListener("mousemove", proxy_touchmove)
+    canvas.addEventListener("mouseup", proxy_touchend)
+    document.getElementById("success-overlay").addEventListener("mousedown", create_proxy(lambda e: init_round()))
+    document.getElementById("success-overlay").addEventListener("touchstart", create_proxy(lambda e: init_round()))
+
+    window.addEventListener("resize", proxy_resize)
+
+    # Boot
+    resize_canvas()
+  </script>
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('sw.js').then((reg) => {
+                    console.log('SW registered!', reg);
+                }).catch((err) => {
+                    console.log('SW failed!', err);
+                });
+            });
+        }
+    </script>
+</body>
+
+</html>
